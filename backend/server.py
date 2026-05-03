@@ -8,9 +8,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr, Field
-
-from emergentintegrations.llm.openai import OpenAITextToSpeech
+from pydantic import BaseModel, Field
+import httpx
 
 load_dotenv()
 
@@ -55,9 +54,9 @@ leads_collection = db["leads"]
 class ContactCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     phone: str = Field(min_length=8, max_length=32)
-    email: EmailStr
-    message: str = Field(min_length=4, max_length=4000)
-    project_type: str = Field(min_length=2, max_length=120)
+    email: str = Field(default="", max_length=200)
+    message: str = Field(default="", max_length=4000)
+    project_type: str = Field(default="", max_length=120)
 
 
 class ContactOut(BaseModel):
@@ -86,23 +85,32 @@ async def commercial_info():
 
 
 async def _generate_audio_file() -> None:
-    api_key = os.getenv("EMERGENT_LLM_KEY")
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("EMERGENT_LLM_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="EMERGENT_LLM_KEY nao configurada")
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
     try:
-        tts = OpenAITextToSpeech(api_key=api_key)
-        audio_bytes = await tts.generate(
-            text=COMMERCIAL_SCRIPT,
-            voice="nova",
-            model="tts-1-hd",
-            speed=0.92,
-            response_format="mp3",
-        )
-        if not audio_bytes:
-            raise ValueError("Resposta de audio vazia")
-        AUDIO_FILE.write_bytes(audio_bytes)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/audio/speech",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "tts-1-hd",
+                    "input": COMMERCIAL_SCRIPT,
+                    "voice": "nova",
+                    "speed": 0.92,
+                    "response_format": "mp3",
+                },
+            )
+            if response.status_code != 200:
+                raise ValueError(f"OpenAI API returned {response.status_code}: {response.text}")
+            AUDIO_FILE.write_bytes(response.content)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Error calling OpenAI TTS: {exc}") from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao gerar audio: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Error generating audio: {exc}") from exc
 
 
 @app.get("/api/commercial/audio")
