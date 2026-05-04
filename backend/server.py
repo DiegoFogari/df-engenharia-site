@@ -36,6 +36,7 @@ AUDIO_FILE = AUDIO_CACHE_DIR / "df_commercial.mp3"
 
 app = FastAPI(title="DF Engenharia API")
 
+# Configuração de CORS dinâmica
 cors_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",")]
 app.add_middleware(
     CORSMiddleware,
@@ -45,18 +46,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- CORREÇÃO DA CONEXÃO MONGODB ---
 mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017/df_engenharia")
-# Usamos AsyncIOMotorClient que já foi importado no seu topo
+# Substituído o erro 'dhvfdi86' pela classe correta AsyncIOMotorClient
 mongo_client = AsyncIOMotorClient(mongo_url)
 
-# O Render/MongoDB Atlas às vezes não retorna o DB padrão na URL, 
-# então definimos um nome fixo caso falhe.
-db = mongo_client.get_default_database() 
+# Obtém o banco de dados da URL ou define um padrão
+db = mongo_client.get_default_database()
 if db is None:
     db = mongo_client["df_engenharia_db"]
-    
-leads_collection = db["leads"]
 
+leads_collection = db["leads"]
+# ----------------------------------
 
 class ContactCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
@@ -64,7 +65,6 @@ class ContactCreate(BaseModel):
     email: str = Field(default="", max_length=200)
     message: str = Field(default="", max_length=4000)
     project_type: str = Field(default="", max_length=120)
-
 
 class ContactOut(BaseModel):
     id: str
@@ -75,11 +75,9 @@ class ContactOut(BaseModel):
     project_type: str
     created_at: datetime
 
-
 @app.get("/api/")
 async def health_check():
     return {"status": "ok", "service": "df-engenharia-backend"}
-
 
 @app.get("/api/commercial/info")
 async def commercial_info():
@@ -90,9 +88,8 @@ async def commercial_info():
         "script": COMMERCIAL_SCRIPT,
     }
 
-
 async def _generate_audio_file() -> None:
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("EMERGENT_LLM_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
     try:
@@ -119,13 +116,11 @@ async def _generate_audio_file() -> None:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error generating audio: {exc}") from exc
 
-
 @app.get("/api/commercial/audio")
 async def commercial_audio():
     if not AUDIO_FILE.exists():
         await _generate_audio_file()
     return FileResponse(AUDIO_FILE, media_type="audio/mpeg", filename="df-comercial.mp3")
-
 
 @app.post("/api/contact")
 async def create_contact(payload: ContactCreate):
@@ -133,7 +128,6 @@ async def create_contact(payload: ContactCreate):
     data["created_at"] = datetime.utcnow()
     result = await leads_collection.insert_one(data)
     return {"ok": True, "id": str(result.inserted_id)}
-
 
 @app.get("/api/contact", response_model=List[ContactOut])
 async def list_contacts(limit: Optional[int] = 100):
