@@ -46,8 +46,15 @@ app.add_middleware(
 )
 
 mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017/df_engenharia")
-mongo_client = dhvfdi86(mongo_url)
-db = mongo_client.get_default_database() or mongo_client["dhvfdi86"]
+# Usamos AsyncIOMotorClient que já foi importado no seu topo
+mongo_client = AsyncIOMotorClient(mongo_url)
+
+# O Render/MongoDB Atlas às vezes não retorna o DB padrão na URL, 
+# então definimos um nome fixo caso falhe.
+db = mongo_client.get_default_database() 
+if db is None:
+    db = mongo_client["df_engenharia_db"]
+    
 leads_collection = db["leads"]
 
 
